@@ -7,64 +7,108 @@ getwd()
 setwd('/home/mofongo/Documents/ghfc/salesAnalysis')
 list.files()
 
-vori <- read.csv('./vori_sales_09122023_12262024.csv')
-summary(vori)
-names(vori)
-str(vori)
+vori <- read.csv('./vori_sales_data/vori_sales_09122023_12262024.csv')
+vori.2 <- read.csv('./vori_sales_data/vori_Net Sales_first6months.csv')
+vori.3 <- read.csv('./vori_sales_data/voriSales_2H23_testNet Sales.csv')
 
+# normalize the names of the dataframes, then compare their column set and schema
 names(vori) <- gsub('\\.','_',names(vori))
+names(vori.2) <- gsub('\\.','_',names(vori.2))
+names(vori.3) <- gsub('\\.','_',names(vori.3))
 
-vori |>
-  mutate(date = as.Date(vori$Order_Day,'%a, %b %d, %Y')) -> vori
+#compare equality
+all(names(vori) == names(vori.2)) && all(sapply(vori, class) == sapply(vori.2, class))
 
-#isolate the only columns I care about
-vori |>
-  select(date,Value) |>
-  unique() -> sales.vori
+# Define the function
+normalize_df <- function(df) {
+  #ensure that the df contains an Order_Day and Value field
+  if(!all(list('Order_Day','Value') %in% names(df))) {
+    stop("expected column names are not found in the passed DF")
+  }
+  
+  # Main logic
+  df |>
+    mutate(date = as.Date(df$Order_Day,'%a, %b %d, %Y')) -> df.1
+  
+  #isolate the only columns I care about
+  df.1 |>
+    select(date,Value) |>
+    unique() -> sales.vori
+  
+  #output 
+  sales.vori |>
+    as_tsibble(index = date) -> vori.t
+  
+  if(!nrow(vori.t)>0){
+    stop("transformed df has 0 rows")
+  }
+  
+  # Return the result
+  return(vori.t)
+}
+
+test <- normalize_df(vori)
+test.2 <- normalize_df(vori.2)
+test.3 <- normalize_df(vori.3)
+
 
 #check min and max dates
-sales.vori |>
-  summarize(min = min(date), max = max(date))
-
-sales.vori |>
-  as_tsibble(index = date) -> vori.t
+test.2 |>
+  as.data.frame() |>
+  summarise(min = min(date), max = max(date))
 
 #reveal the interval
-interval(vori.t)
-
-class(vori.t)
-
-vori.t |>
-  autoplot(Value)
-
-scan_gaps(vori.t.ng)
+interval(test.2)
 
 #fill gaps, setting them to 0
-vori.t |>
-  fill_gaps(Value = 0) -> vori.t.ng
+test |>
+  fill_gaps(Value = 0) -> test.ng
+
+test.2 |>
+  fill_gaps(Value = 0) -> test.2.ng
+
+test.3 |>
+  fill_gaps(Value = 0) -> test.3.ng
 
 #change the grouping to monthly
-vori.t.ng |>
+test.ng |>
   index_by(yearmon = yearmonth(date)) |>
-  summarize(size = n(), sales = sum(Value)) -> vori.t.ng
+  summarize(size = n(), sales = sum(Value)) -> test.ng.2
 
-interval(vori.t.ng)
+test.2.ng |>
+  index_by(yearmon = yearmonth(date)) |>
+  summarize(size = n(), sales = sum(Value)) -> test.2.ng.2
+
+test.3.ng |>
+  index_by(yearmon = yearmonth(date)) |>
+  summarize(size = n(), sales = sum(Value)) -> test.3.ng.2
 
 
-vori.t |>
-ggplot(aes(x = date)) +
-  geom_line(aes(y = Value)) +
-  labs(title = 'Vori Daily Sales', x = 'day', y = 'sales')
+#verify interval
+interval(test.2.ng.2)
+
+
+test.ng.2 |>
+  filter(size>27) |>
+  autoplot(vars(sales))
+
+test.3.ng.2 |>
+  filter(size>27) |>
+  autoplot(vars(sales))
+
+
+
+names(test.ng.2)
 
 #build the appropriate factor variable
-vori.t.ng |>
-  mutate(yr_factor = factor(year(yearmon), labels = c("2023","2024"))) -> test
+test.ng.2 |>
+  mutate(yr_factor = factor(year(yearmon), labels = c("2023","2024"))) -> plot.df
 
 add_commas <- function(x) {
   format(x, big.mark = ",", scientific = FALSE)
 }
 
-test |>
+plot.df |>
   filter(size>27) |>
   #mutate(yr_factor = as.factor(year(yearmon)) |>
   ggplot(aes(x=month(yearmon), color = yr_factor, group = yr_factor)) +
