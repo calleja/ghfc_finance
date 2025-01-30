@@ -20,7 +20,7 @@ names(vori.3) <- gsub('\\.','_',names(vori.3))
 all(names(vori) == names(vori.2)) && all(sapply(vori, class) == sapply(vori.2, class))
 
 # Define the function
-normalize_df <- function(df) {
+normalize_df <- function(df, return_type = 'tsibble') {
   #ensure that the df contains an Order_Day and Value field
   if(!all(list('Order_Day','Value') %in% names(df))) {
     stop("expected column names are not found in the passed DF")
@@ -43,62 +43,45 @@ normalize_df <- function(df) {
     stop("transformed df has 0 rows")
   }
   
+  if(return_type == 'df'){
+    return(sales.vori)
+  }
+  else {
   # Return the result
   return(vori.t)
+  }
 }
 
-test <- normalize_df(vori)
-test.2 <- normalize_df(vori.2)
-test.3 <- normalize_df(vori.3)
+test <- normalize_df(vori,'df')
+test.2 <- normalize_df(vori.2,'df')
+test.3 <- normalize_df(vori.3,'df')
 
 
-#check min and max dates
-test.2 |>
-  as.data.frame() |>
-  summarise(min = min(date), max = max(date))
+#working with dataframes
+combined_df <- bind_rows(test,test.2,test.3)
 
-#reveal the interval
-interval(test.2)
+#selection criteria for dupes
+combined_df |>
+  group_by(date) |>
+  summarize(net.sales = max(Value)) -> combined_df2
 
-#fill gaps, setting them to 0
-test |>
-  fill_gaps(Value = 0) -> test.ng
-
-test.2 |>
-  fill_gaps(Value = 0) -> test.2.ng
-
-test.3 |>
-  fill_gaps(Value = 0) -> test.3.ng
+#convert to tsibble
+combined_df2 |>
+  as_tsibble(index = date) |>
+  fill_gaps(net.sales = 0) -> vori.t
 
 #change the grouping to monthly
-test.ng |>
+vori.t |>
   index_by(yearmon = yearmonth(date)) |>
-  summarize(size = n(), sales = sum(Value)) -> test.ng.2
-
-test.2.ng |>
-  index_by(yearmon = yearmonth(date)) |>
-  summarize(size = n(), sales = sum(Value)) -> test.2.ng.2
-
-test.3.ng |>
-  index_by(yearmon = yearmonth(date)) |>
-  summarize(size = n(), sales = sum(Value)) -> test.3.ng.2
-
+  summarize(size = n(), sales = sum(net.sales)) -> vori.t.2
 
 #verify interval
-interval(test.2.ng.2)
+interval(vori.t.2)
 
-
-test.ng.2 |>
-  filter(size>27) |>
-  autoplot(vars(sales))
-
-test.3.ng.2 |>
-  filter(size>27) |>
-  autoplot(vars(sales))
-
-
-
-names(test.ng.2)
+vori.t.2 |>
+  filter(size>27 & yearmon < yearmonth(as.Date("2024-12-01"))) |>
+  autoplot(vars(sales)) +
+  labs(title = 'Net sales by month', y='net sales', x=' year month')
 
 #build the appropriate factor variable
 test.ng.2 |>
